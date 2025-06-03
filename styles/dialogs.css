@@ -1,0 +1,81 @@
+/* 對話框視窗 */
+.dialog-window {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(44, 62, 80, 0.98);
+    border: 3px solid #34495e;
+    border-radius: 10px;
+    padding: 20px;
+    min-width: 400px;
+    max-width: 600px;
+    z-index: 1000;
+    display: none;
+}
+
+.dialog-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    border-bottom: 1px solid #34495e;
+    padding-bottom: 10px;
+}
+
+/* 商店系統 */
+.shop-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin: 15px 0;
+}
+
+.shop-item {
+    background: rgba(52, 73, 94, 0.8);
+    border: 2px solid #34495e;
+    border-radius: 8px;
+    padding: 10px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.shop-item:hover {
+    border-color: #3498db;
+    background: rgba(52, 73, 94, 1);
+}
+
+.shop-item-emoji {
+    font-size: 24px;
+    display: block;
+    margin-bottom: 5px;
+}
+
+.shop-item-name {
+    font-size: 12px;
+    margin-bottom: 3px;
+}
+
+.shop-item-price {
+    color: #f1c40f;
+    font-size: 10px;
+}
+
+/* 購買控制 */
+.purchase-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.quantity-input {
+    width: 60px;
+    padding: 5px;
+    border: 1px solid #34495e;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    text-align: center;
+}

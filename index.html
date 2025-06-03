@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>魔法寵物世界 MMORPG</title>
+    <link rel="stylesheet" href="styles/main.css" />
+    <link rel="stylesheet" href="styles/ui.css" />
+    <link rel="stylesheet" href="styles/dialogs.css" />
+  </head>
+  <body>
+    <!-- 登入畫面 -->
+    <div id="loginScreen" class="login-screen">
+      <div class="login-form">
+        <h1>🐾 魔法寵物世界 🐾</h1>
+        <p>進入MMORPG冒險世界</p>
+        <div class="form-group">
+          <input
+            type="text"
+            id="playerName"
+            placeholder="輸入角色名稱"
+            maxlength="12"
+          />
+        </div>
+        <button class="btn-login" onclick="startGame()">開始遊戲</button>
+      </div>
+    </div>
+
+    <!-- 遊戲畫布 -->
+    <canvas id="gameCanvas" width="1024" height="768"></canvas>
+
+    <!-- UI覆蓋層 -->
+    <div class="ui-overlay">
+      <!-- 狀態面板 -->
+      <div class="status-panel ui-panel">
+        <h3 id="playerInfo">角色名稱</h3>
+        <div>
+          <span
+            >HP: <span id="currentHp">100</span>/<span id="maxHp"
+              >100</span
+            ></span
+          >
+          <div class="health-bar">
+            <div class="health-fill" id="hpBar" style="width: 100%"></div>
+          </div>
+        </div>
+        <div>
+          <span
+            >MP: <span id="currentMp">50</span>/<span id="maxMp">50</span></span
+          >
+          <div class="mana-bar">
+            <div class="mana-fill" id="mpBar" style="width: 100%"></div>
+          </div>
+        </div>
+        <div>
+          <span
+            >EXP: <span id="currentExp">0</span>/<span id="maxExp"
+              >100</span
+            ></span
+          >
+          <div class="exp-bar">
+            <div class="exp-fill" id="expBar" style="width: 0%"></div>
+          </div>
+        </div>
+        <p>等級: <span id="playerLevel">1</span></p>
+        <div class="gold-display">
+          金錢: <span id="playerGold">100</span> 💰
+        </div>
+      </div>
+
+      <!-- 控制面板 -->
+      <div class="controls-panel ui-panel">
+        <h4>視窗控制</h4>
+        <button class="control-button" onclick="toggleInventory()">
+          道具欄 (I)
+        </button>
+        <button class="control-button" onclick="toggleEquipment()">
+          裝備欄 (E)
+        </button>
+        <button class="control-button" onclick="toggleMagic()">
+          魔法欄 (M)
+        </button>
+        <button class="control-button" onclick="summonPet()">召喚寵物</button>
+      </div>
+
+      <!-- 聊天面板 -->
+      <div class="chat-panel ui-panel">
+        <h4>聊天</h4>
+        <div class="chat-messages" id="chatMessages"></div>
+        <input
+          type="text"
+          class="chat-input"
+          id="chatInput"
+          placeholder="輸入訊息..."
+          onkeypress="handleChatInput(event)"
+        />
+      </div>
+
+      <!-- 小地圖 -->
+      <canvas class="minimap" id="minimap" width="150" height="150"></canvas>
+
+      <!-- 增益狀態顯示 -->
+      <div id="buffDisplay" class="buff-display">
+        <h4>增益效果</h4>
+        <div id="buffList"></div>
+      </div>
+    </div>
+
+    <!-- 道具說明框 -->
+    <div id="itemTooltip" class="item-tooltip">
+      <div class="tooltip-title" id="tooltipTitle">道具名稱</div>
+      <div class="tooltip-description" id="tooltipDescription">道具說明</div>
+      <div class="tooltip-effect" id="tooltipEffect">效果說明</div>
+      <div class="tooltip-value" id="tooltipValue">價值資訊</div>
+    </div>
+
+    <!-- 增益說明懸停框 -->
+    <div id="buffTooltip" class="buff-tooltip">
+      <div id="buffTooltipContent"></div>
+    </div>
+
+    <!-- 道具欄視窗 -->
+    <div id="inventoryWindow" class="inventory-window">
+      <div class="window-header">
+        <h4>道具欄</h4>
+        <button class="close-btn" onclick="toggleInventory()">×</button>
+      </div>
+      <div class="inventory-grid" id="inventoryGrid">
+        <!-- 道具格子將動態生成 -->
+      </div>
+      <div class="gold-display">
+        金錢: <span id="inventoryGold">100</span> 💰
+      </div>
+    </div>
+
+    <!-- 裝備欄視窗 -->
+    <div id="equipmentWindow" class="equipment-window">
+      <div class="window-header">
+        <h4>裝備欄</h4>
+        <button class="close-btn" onclick="toggleEquipment()">×</button>
+      </div>
+      <div class="equipment-grid" id="equipmentGrid">
+        <!-- 裝備格子將動態生成 -->
+      </div>
+    </div>
+
+    <!-- 魔法欄視窗 -->
+    <div id="magicWindow" class="magic-window">
+      <div class="window-header">
+        <h4>魔法欄</h4>
+        <button class="close-btn" onclick="toggleMagic()">×</button>
+      </div>
+      <div class="magic-grid" id="magicGrid">
+        <!-- 魔法格子將動態生成 -->
+      </div>
+    </div>
+
+    <!-- NPC對話/購買視窗 -->
+    <div id="dialogWindow" class="dialog-window">
+      <div class="dialog-header">
+        <h3 id="dialogNPCName">NPC名稱</h3>
+        <button class="close-btn" onclick="closeDialog()">×</button>
+      </div>
+      <div id="dialogContent">
+        <p id="dialogText">對話內容</p>
+        <div id="shopContent" style="display: none">
+          <h4>商店</h4>
+          <div class="shop-grid" id="shopGrid">
+            <!-- 商品將動態生成 -->
+          </div>
+          <div
+            class="purchase-controls"
+            id="purchaseControls"
+            style="display: none"
+          >
+            <span>購買數量:</span>
+            <input
+              type="number"
+              class="quantity-input"
+              id="purchaseQuantity"
+              value="1"
+              min="1"
+            />
+            <button class="btn btn-buy" onclick="confirmPurchase()">
+              購買
+            </button>
+            <span id="totalPrice">總價: 0 💰</span>
+          </div>
+        </div>
+        <div style="margin-top: 15px">
+          <button class="btn" onclick="showShop()">查看商店</button>
+          <button class="btn" onclick="closeDialog()">離開</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 載入所有 JavaScript 檔案 -->
+    <script src="js/entities/Effect.js"></script>
+    <script src="js/entities/Projectile.js"></script>
+    <script src="js/entities/Player.js"></script>
+    <script src="js/entities/Monster.js"></script>
+    <script src="js/entities/NPC.js"></script>
+    <script src="js/entities/Pet.js"></script>
+    <script src="js/Game.js"></script>
+    <script src="js/main.js"></script>
+  </body>
+</html>
