@@ -1,215 +1,26 @@
-// ============================================================
-// MMO2 1.49 Realtime Client
-// 真正的 WebSocket 多人連線層：在線玩家、地圖分房、狀態同步、世界聊天。
-// GitHub Pages 只負責前端；正式版需部署 /server 的 Node.js WebSocket 服務。
-// ============================================================
-(function () {
-  'use strict';
-
-  const CFG_KEY = 'mmo149_ws_url';
-  const DEFAULT_LOCAL = 'ws://localhost:8080';
-  const state = {
-    socket: null,
-    connected: false,
-    reconnectTimer: null,
-    heartbeatTimer: null,
-    syncTimer: null,
-    clientId: null,
-    online: new Map(),
-    lastSnapshot: ''
-  };
-
-  function configuredUrl() {
-    try {
-      const qs = new URLSearchParams(location.search);
-      const fromQuery = qs.get('ws');
-      if (fromQuery) {
-        localStorage.setItem(CFG_KEY, fromQuery);
-        return fromQuery;
-      }
-      const saved = localStorage.getItem(CFG_KEY);
-      if (saved) return saved;
-    } catch (_) {}
-    return DEFAULT_LOCAL;
-  }
-
-  function publicPlayerSnapshot() {
-    const p = (typeof player !== 'undefined' && player) ? player : null;
-    const ms = (typeof mapState !== 'undefined' && mapState) ? mapState : null;
-    if (!p || !p.cls) return null;
-    return {
-      name: String(p.name || '未命名').slice(0, 12),
-      cls: p.cls,
-      lv: Number(p.lv || 1),
-      hp: Number(p.hp || p.curHp || 0),
-      maxHp: Number(p.maxHp || p.mhp || 0),
-      mp: Number(p.mp || p.curMp || 0),
-      maxMp: Number(p.maxMp || p.mmp || 0),
-      map: String((ms && (ms.map || ms.id || ms.mapId)) || p.map || 'town_talking'),
-      x: Number((p.x != null ? p.x : (ms && ms.x)) || 0),
-      y: Number((p.y != null ? p.y : (ms && ms.y)) || 0),
-      avatar: String(p.avatar || ''),
-      pledge: String(p.bloodPledge || '')
-    };
-  }
-
-  function send(type, payload) {
-    if (!state.socket || state.socket.readyState !== WebSocket.OPEN) return false;
-    state.socket.send(JSON.stringify({ type, payload: payload || {} }));
-    return true;
-  }
-
-  function sys(text) {
-    try {
-      if (typeof addSysLog === 'function') { addSysLog('[連線] ' + text); return; }
-      const el = document.getElementById('sys-log') || document.getElementById('world-log');
-      if (el) {
-        const div = document.createElement('div');
-        div.textContent = '[連線] ' + text;
-        el.appendChild(div);
-      }
-    } catch (_) {}
-  }
-
-  function worldMessage(msg) {
-    try {
-      const el = document.getElementById('world-log');
-      if (!el) return;
-      const row = document.createElement('div');
-      row.className = 'world-line realtime-line';
-      row.textContent = '[' + (msg.name || '玩家') + '] ' + (msg.text || '');
-      el.appendChild(row);
-      el.scrollTop = el.scrollHeight;
-    } catch (_) {}
-  }
-
-  function updateOnlineUi() {
-    let badge = document.getElementById('mmo149-online-badge');
-    if (!badge) {
-      badge = document.createElement('div');
-      badge.id = 'mmo149-online-badge';
-      badge.style.cssText = 'position:fixed;right:12px;top:12px;z-index:9999;background:rgba(5,15,25,.88);border:1px solid #44657a;color:#d9edf7;padding:6px 10px;border-radius:5px;font:12px/1.3 Microsoft JhengHei,sans-serif;pointer-events:none';
-      document.body.appendChild(badge);
-    }
-    badge.textContent = state.connected ? ('● 即時連線｜在線 ' + state.online.size) : '○ 離線模式';
-  }
-
-  function onPacket(packet) {
-    if (!packet || typeof packet !== 'object') return;
-    const p = packet.payload || {};
-    switch (packet.type) {
-      case 'welcome':
-        state.clientId = p.id || null;
-        break;
-      case 'presence':
-        state.online.clear();
-        (p.players || []).forEach(x => { if (x && x.id) state.online.set(x.id, x); });
-        updateOnlineUi();
-        window.dispatchEvent(new CustomEvent('mmo149:presence', { detail: Array.from(state.online.values()) }));
-        break;
-      case 'player_join':
-      case 'player_state':
-        if (p && p.id) state.online.set(p.id, p);
-        updateOnlineUi();
-        window.dispatchEvent(new CustomEvent('mmo149:player', { detail: p }));
-        break;
-      case 'player_leave':
-        if (p && p.id) state.online.delete(p.id);
-        updateOnlineUi();
-        break;
-      case 'world_chat':
-        worldMessage(p);
-        break;
-      case 'error':
-        sys(p.message || '伺服器錯誤');
-        break;
-    }
-  }
-
-  function connect() {
-    clearTimeout(state.reconnectTimer);
-    let url = configuredUrl();
-    try {
-      state.socket = new WebSocket(url);
-    } catch (e) {
-      scheduleReconnect();
-      return;
-    }
-    state.socket.addEventListener('open', function () {
-      state.connected = true;
-      updateOnlineUi();
-      sys('已連上多人伺服器');
-      const snap = publicPlayerSnapshot();
-      if (snap) send('hello', snap);
-      clearInterval(state.heartbeatTimer);
-      state.heartbeatTimer = setInterval(() => send('ping', { t: Date.now() }), 15000);
-    });
-    state.socket.addEventListener('message', function (ev) {
-      try { onPacket(JSON.parse(ev.data)); } catch (_) {}
-    });
-    state.socket.addEventListener('close', function () {
-      state.connected = false;
-      state.online.clear();
-      updateOnlineUi();
-      scheduleReconnect();
-    });
-    state.socket.addEventListener('error', function () {
-      try { state.socket.close(); } catch (_) {}
-    });
-  }
-
-  function scheduleReconnect() {
-    clearTimeout(state.reconnectTimer);
-    state.reconnectTimer = setTimeout(connect, 3000);
-  }
-
-  function syncSelf() {
-    const snap = publicPlayerSnapshot();
-    if (!snap || !state.connected) return;
-    const json = JSON.stringify(snap);
-    if (json === state.lastSnapshot) return;
-    state.lastSnapshot = json;
-    send('state', snap);
-  }
-
-  // 將原本本機世界頻道輸入升級成真正多人世界聊天；保留原函式做離線 fallback。
-  function hookWorldChat() {
-    if (typeof window.worldChannelAsk !== 'function' || window.__mmo149WorldHook) return;
-    const old = window.worldChannelAsk;
-    window.worldChannelAsk = function () {
-      const input = document.getElementById('world-input');
-      const text = input ? input.value.trim() : '';
-      const snap = publicPlayerSnapshot();
-      if (state.connected && text) {
-        send('world_chat', { text: text.slice(0, 80), name: snap ? snap.name : '玩家' });
-        if (input) input.value = '';
-        return;
-      }
-      return old.apply(this, arguments);
-    };
-    window.__mmo149WorldHook = true;
-  }
-
-  window.MMO149Realtime = {
-    connect,
-    send,
-    onlinePlayers: () => Array.from(state.online.values()),
-    isConnected: () => state.connected,
-    setServerUrl: function (url) {
-      localStorage.setItem(CFG_KEY, String(url || ''));
-      try { if (state.socket) state.socket.close(); } catch (_) {}
-      connect();
-    },
-    getServerUrl: configuredUrl
-  };
-
-  function boot() {
-    updateOnlineUi();
-    hookWorldChat();
-    connect();
-    clearInterval(state.syncTimer);
-    state.syncTimer = setInterval(function () { hookWorldChat(); syncSelf(); }, 500);
-  }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
-  else boot();
+// MMO2 1.49 authoritative realtime client
+(function(){
+'use strict';
+const CFG='mmo149_ws_url', TOKEN='mmo149_server_token';
+const S={ws:null,connected:false,authed:false,id:null,online:[],snapshot:null,retry:null};
+function url(){try{let q=new URLSearchParams(location.search).get('ws');if(q){localStorage.setItem(CFG,q);return q;}let s=localStorage.getItem(CFG);if(s)return s;}catch(_){}return 'ws://localhost:8080';}
+function send(type,payload){if(!S.ws||S.ws.readyState!==WebSocket.OPEN)return false;S.ws.send(JSON.stringify({type,payload:payload||{}}));return true;}
+function localIdentity(){let p=(typeof player!=='undefined'&&player)||{};return{name:String(p.name||'').slice(0,12),cls:p.cls||''};}
+function auth(){let i=localIdentity();send('auth',{token:localStorage.getItem(TOKEN)||'',name:i.name,cls:i.cls});}
+function badge(){let e=document.getElementById('mmo149-online-badge');if(!e){e=document.createElement('div');e.id='mmo149-online-badge';e.style.cssText='position:fixed;right:12px;top:12px;z-index:9999;background:rgba(5,15,25,.9);border:1px solid #44657a;color:#d9edf7;padding:6px 10px;border-radius:5px;font:12px Microsoft JhengHei,sans-serif';document.body.appendChild(e);}e.textContent=S.connected?(S.authed?'● 伺服器權威｜在線 '+S.online.length:'● 已連線｜等待角色登入'):'○ 多人伺服器離線';}
+function applySelf(c){if(!c||typeof player==='undefined'||!player)return;player.name=c.name;player.cls=c.cls;player.lv=c.lv;player.hp=c.hp;player.mhp=c.maxHp;player.mp=c.mp;player.mmp=c.maxMp;player.gold=c.gold;player.exp=c.exp;if(typeof mapState!=='undefined'&&mapState)mapState.current=c.map;try{if(typeof calcStats==='function')calcStats();if(typeof updateUI==='function')updateUI();}catch(_){} }
+function applyWorld(w){if(!w||typeof mapState==='undefined'||!mapState)return;mapState.current=w.map;mapState.mobs=(w.mobs||[]).map(function(sm){let base=(typeof DB!=='undefined'&&DB.mobs&&DB.mobs[sm.templateId])||{};return Object.assign({},base,{uid:sm.uid,_serverUid:sm.uid,_serverTemplate:sm.templateId,lv:sm.lv,hp:sm.maxHp,curHp:sm.hp,_dead:!!sm.dead});});while(mapState.mobs.length<5)mapState.mobs.push(null);try{if(typeof setMapSelectors==='function')setMapSelectors(w.map);if(typeof renderMobs==='function')renderMobs();}catch(_){} }
+function packet(m){let p=m.payload||{};if(m.type==='welcome'){S.id=p.id;auth();}else if(m.type==='auth_ok'){S.authed=true;if(p.token)localStorage.setItem(TOKEN,p.token);applySelf(p.character);badge();}else if(m.type==='snapshot'){S.snapshot=p;applySelf(p.self);applyWorld(p.world);window.dispatchEvent(new CustomEvent('mmo149:snapshot',{detail:p}));}else if(m.type==='presence'){S.online=p.players||[];badge();}else if(m.type==='world_chat'){let e=document.getElementById('world-log');if(e){let d=document.createElement('div');d.textContent='['+(p.name||'玩家')+'] '+(p.text||'');e.appendChild(d);e.scrollTop=e.scrollHeight;}}else if(m.type==='error'){console.warn('[MMO149]',p.message||'server error');}}
+function connect(){clearTimeout(S.retry);try{S.ws=new WebSocket(url());}catch(_){return retry();}S.ws.onopen=function(){S.connected=true;S.authed=false;badge();auth();};S.ws.onmessage=function(e){try{packet(JSON.parse(e.data));}catch(_){}};S.ws.onclose=function(){S.connected=false;S.authed=false;badge();retry();};S.ws.onerror=function(){try{S.ws.close();}catch(_){}};}
+function retry(){clearTimeout(S.retry);S.retry=setTimeout(connect,3000);}
+function hook(){
+  // 地圖：多人連線時只向伺服器提出請求，不允許本機自行決定最終所在地。
+  if(typeof window.changeMap==='function'&&!window.__mmo149MapHook){let old=window.changeMap;window.changeMap=function(force){if(S.authed&&!force){let el=document.getElementById('map-select'),target=el&&el.value;if(target){send('map_change',{map:target});return false;}}return old.apply(this,arguments);};window.__mmo149MapHook=true;}
+  // 普攻：伺服器計算命中、傷害、擊殺、經驗與金幣；本機不再扣怪物 HP。
+  if(typeof window.playerAttack==='function'&&!window.__mmo149AttackHook){let old=window.playerAttack;window.playerAttack=function(){if(S.authed){let t=typeof getTarget==='function'?getTarget():null;if(t&&t._serverUid)send('attack',{uid:t._serverUid});return;}return old.apply(this,arguments);};window.__mmo149AttackHook=true;}
+  if(typeof window.worldChannelAsk==='function'&&!window.__mmo149ChatHook){let old=window.worldChannelAsk;window.worldChannelAsk=function(){let input=document.getElementById('world-input'),text=input?input.value.trim():'';if(S.authed&&text){send('world_chat',{text:text.slice(0,80)});input.value='';return;}return old.apply(this,arguments);};window.__mmo149ChatHook=true;}
+}
+window.MMO149Realtime={connect:connect,send:send,isConnected:()=>S.connected,isAuthoritative:()=>S.authed,onlinePlayers:()=>S.online.slice(),snapshot:()=>S.snapshot,setServerUrl:function(v){localStorage.setItem(CFG,String(v||''));try{S.ws.close();}catch(_){}connect();}};
+function boot(){badge();hook();connect();setInterval(function(){hook();if(S.connected)send('ping',{t:Date.now()});},5000);}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
