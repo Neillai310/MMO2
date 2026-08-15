@@ -1,0 +1,11 @@
+// Prevent live character snapshots from overwriting a map the player is currently selecting.
+(function(){
+'use strict';
+let userChoosing=false,chosenMap='',chosenGroup='',pendingMap='',lastServerMap='';
+function setup(){const group=document.getElementById('map-category'),map=document.getElementById('map-select'),go=document.getElementById('map-go');if(!group||!map||!go||go.dataset.selectionFix)return false;go.dataset.selectionFix='1';const mark=()=>{userChoosing=true;chosenGroup=group.value;chosenMap=map.value;};group.addEventListener('pointerdown',()=>{userChoosing=true;chosenGroup=group.value;chosenMap=map.value;},true);group.addEventListener('change',()=>{userChoosing=true;chosenGroup=group.value;setTimeout(()=>{chosenMap=map.value;},0);},true);map.addEventListener('pointerdown',mark,true);map.addEventListener('change',mark,true);go.addEventListener('click',()=>{pendingMap=map.value;chosenMap=map.value;chosenGroup=group.value;userChoosing=true;},true);return true;}
+function preserve(){if(!userChoosing)return;const group=document.getElementById('map-category'),map=document.getElementById('map-select');if(!group||!map)return;if(chosenGroup&&group.value!==chosenGroup){group.value=chosenGroup;group.dispatchEvent(new Event('change',{bubbles:true}));}if(chosenMap&&[...map.options].some(o=>o.value===chosenMap))map.value=chosenMap;}
+function onSnapshot(p){const serverMap=p?.self?.map||p?.world?.map||'';if(!serverMap)return;if(pendingMap&&serverMap===pendingMap){pendingMap='';userChoosing=false;chosenMap='';chosenGroup='';lastServerMap=serverMap;return;}if(!userChoosing)lastServerMap=serverMap;queueMicrotask(preserve);setTimeout(preserve,0);}
+function boot(){if(!setup()){const t=setInterval(()=>{if(setup())clearInterval(t);},50);}const rt=window.MMO149Realtime;if(!rt)return;let last='';setInterval(()=>{const snap=rt.snapshot?.();if(!snap)return;const sig=String(snap.self?.map||'')+'|'+String(snap.event?.type||'')+'|'+String(snap.event?.to||'');if(sig!==last){last=sig;onSnapshot(snap);}else preserve();},80);}
+window.MMO149MapSelectionFix={preserve,onSnapshot};
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
+})();
