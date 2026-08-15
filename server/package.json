@@ -1,14 +1,16 @@
 {
   "name": "mmo2-classic149-realtime",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
-  "description": "MMO2 1.49 authoritative realtime WebSocket server with PostgreSQL persistence",
-  "main": "server.js",
+  "description": "MMO2 1.49 authoritative realtime WebSocket server with PostgreSQL account authentication and persistence",
+  "main": "auth-gateway.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node auth-gateway.js",
+    "game": "node server.js",
+    "check": "node --check auth-gateway.js && node --check server.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=18 <27"
   },
   "dependencies": {
     "pg": "^8.16.3",
