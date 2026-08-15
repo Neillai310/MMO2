@@ -3,7 +3,7 @@
 // one-shot death sprite is shown. No timer mutates the normal monster sprite.
 (function(){
 'use strict';
-const HOLD_MS=520;
+const HOLD_MS=1800;
 const MOB_NAMES={orc:'妖魔',goblin:'哥布林',orc_archer:'妖魔弓箭手',gremlin:'格利芬',zombie:'殭屍',wolf:'狼',skeleton:'骷髏',fighter:'妖魔鬥士',stone_golem:'石頭高崙',spider:'蜘蛛',ghoul:'食屍鬼',sparto:'史巴托',lycan:'狼人',gaster:'卡司特',orc_mage:'妖魔法師',hobgoblin:'哈柏哥布林',bear:'熊',lizardman:'蜥蜴人',ant:'螞蟻',giant_ant:'巨大螞蟻',scorpion:'蠍子',evil_lizard:'邪惡蜥蜴',skel_archer:'骷髏弓箭手',skel_spear:'骷髏槍兵',skel_axe:'骷髏斧兵',ogre:'歐吉',cerberus:'地獄犬',elder:'長者',necromancer:'死靈法師',dk:'死亡騎士',black_knight:'黑騎士',b_knight:'黑騎士',kurt:'克特',dark_elf:'黑暗妖精',ogre_warrior:'歐吉戰士',arian:'亞力安',wyvern:'飛龍',blackelder:'黑長者',dragon:'巨龍',ant_queen:'巨大蟻后'};
 const ITEM_NAMES={potion_red:'紅色藥水',potion_orange:'橙色藥水',potion_clear:'透明藥水',wpn_5:'箭',wpn_22:'銀箭',scroll_weapon:'對武器施法的卷軸',scroll_armor:'對盔甲施法的卷軸',item_dagger:'匕首',item_sword:'長劍',item_bow:'獵人之弓',item_staff:'魔杖',item_leather_armor:'皮甲',item_chain_mail:'鎖子甲',item_helmet:'頭盔',item_shield:'盾牌',skillbook_light:'魔法書(光箭)',skillbook_heal:'魔法書(初級治癒術)'};
 const shownDeaths=new Set();
@@ -20,14 +20,14 @@ function hook(){if(!window.ThinUI||window.ThinUI.__singleDeathRenderer)return fa
 function injectStyles(){if(document.getElementById('single-death-renderer-style'))return;const s=document.createElement('style');s.id='single-death-renderer-style';s.textContent=`
 .world{position:relative}
 #monster-death-layer{position:absolute;inset:0;pointer-events:none;z-index:6}
-.monster-death-once{position:absolute;width:160px;height:160px;display:flex;align-items:center;justify-content:center}
-.monster-death-once img{width:150px;height:150px;object-fit:contain;image-rendering:pixelated;filter:none}
-.monster-death-once[data-slot="0"]{left:30%;top:48%}
-.monster-death-once[data-slot="1"]{left:50%;top:48%;transform:translateX(-50%)}
-.monster-death-once[data-slot="2"]{right:8%;top:48%}
+.monster-death-once{position:absolute;width:170px;height:170px;display:flex;align-items:center;justify-content:center}
+.monster-death-once img{width:160px;height:160px;object-fit:contain;image-rendering:pixelated;filter:none}
+.monster-death-once[data-slot="0"]{left:30%;top:39%}
+.monster-death-once[data-slot="1"]{left:50%;top:39%;transform:translateX(-50%)}
+.monster-death-once[data-slot="2"]{right:8%;top:39%}
 .combat-kill{color:#fde68a;font-weight:700;margin-top:5px}
 .combat-reward{color:#86efac}.combat-drop{color:#93c5fd}
-@media(max-width:760px){.monster-death-once{width:120px;height:120px}.monster-death-once img{width:112px;height:112px}.monster-death-once[data-slot="0"]{left:8%;top:54%}.monster-death-once[data-slot="1"]{left:50%;top:54%}.monster-death-once[data-slot="2"]{right:4%;top:54%}}
+@media(max-width:760px){.monster-death-once{width:132px;height:132px}.monster-death-once img{width:124px;height:124px}.monster-death-once[data-slot="0"]{left:8%;top:46%}.monster-death-once[data-slot="1"]{left:50%;top:46%}.monster-death-once[data-slot="2"]{right:4%;top:46%}}
 `;document.head.appendChild(s);}
 function boot(){injectStyles();if(!hook()){const retry=setInterval(()=>{if(hook())clearInterval(retry);},25);}}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
