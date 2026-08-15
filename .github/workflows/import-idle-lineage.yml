@@ -1,0 +1,26 @@
+name: One-time import idle-lineage-class
+
+on:
+  push:
+    branches:
+      - agent/import-idle-lineage
+    paths:
+      - .github/workflows/import-idle-lineage.yml
+
+permissions:
+  contents: write
+
+jobs:
+  mirror-source-main:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mirror source history into MMO2 main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          git clone --mirror https://github.com/shines871/idle-lineage-class.git source.git
+          cd source.git
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${TARGET_REPOSITORY}.git" refs/heads/main:refs/heads/main
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${TARGET_REPOSITORY}.git" --tags
