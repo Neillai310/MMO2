@@ -10,7 +10,62 @@ function rollClassStats(cls){const r=CLASS_RANGES[cls];if(!r)return null;const o
 function hashPassword(p,s){return crypto.scryptSync(p,Buffer.from(s,'hex'),64).toString('hex')}function makePassword(p){const salt=crypto.randomBytes(16).toString('hex');return{salt,hash:hashPassword(p,salt)}}function safeEqualHex(a,b){try{const x=Buffer.from(a,'hex'),y=Buffer.from(b,'hex');return x.length===y.length&&crypto.timingSafeEqual(x,y)}catch(_){return false}}
 function send(ws,type,payload){if(ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify({type,payload:payload||{}}))}function fail(ws,code,message){send(ws,'error',{code,message})}
 async function initDb(){await db.query(`CREATE TABLE IF NOT EXISTS accounts(username VARCHAR(32) PRIMARY KEY,password_salt VARCHAR(64) NOT NULL,password_hash VARCHAR(256) NOT NULL,character_token VARCHAR(96) UNIQUE NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),last_login_at TIMESTAMPTZ)`);await db.query('CREATE INDEX IF NOT EXISTS idx_accounts_character_token ON accounts(character_token)');console.log('PostgreSQL account authentication ready')}
-function buildRuntimeServer(){const sourcePath=path.join(__dirname,'server.js'),runtimePath=path.join(__dirname,'.server-runtime.js');let src=fs.readFileSync(sourcePath,'utf8');const a="function newCharacter(name,cls){const b=baseForClass(cls),stats=rollStats(cls);return";const b="function newCharacter(name,cls,rolledStats){const b=baseForClass(cls),stats=(rolledStats&&typeof rolledStats==='object')?rolledStats:rollStats(cls);return";const c='char=newCharacter(name,cls);',d='char=newCharacter(name,cls,p.stats);';const e='mob.respawnAt=Date.now()+5000;',f='mob.respawnAt=Date.now()+rint(1000,3000);';const g='dead:m.dead}))};',h='dead:m.dead,respawnAt:m.respawnAt}))};';if(!src.includes(a)||!src.includes(c)||!src.includes(e)||!src.includes(g))throw new Error('server.js runtime hook signature changed');src=src.replace(a,b).replace(c,d).replace(e,f).replace(g,h);fs.writeFileSync(runtimePath,src);return runtimePath}
+function buildRuntimeServer(){
+ const sourcePath=path.join(__dirname,'server.js'),runtimePath=path.join(__dirname,'.server-runtime.js');let src=fs.readFileSync(sourcePath,'utf8');
+ const a="function newCharacter(name,cls){const b=baseForClass(cls),stats=rollStats(cls);return";
+ const b="function newCharacter(name,cls,rolledStats){const b=baseForClass(cls),stats=(rolledStats&&typeof rolledStats==='object')?rolledStats:rollStats(cls);return";
+ const c='char=newCharacter(name,cls);',d='char=newCharacter(name,cls,p.stats);';
+ const e='mob.respawnAt=Date.now()+5000;',f='mob.respawnAt=Date.now()+rint(1000,3000);';
+ const g='dead:m.dead}))};',h='dead:m.dead,respawnAt:m.respawnAt}))};';
+ const dropOld='if(Math.random()<chance)out.push({id,cnt});';
+ const dropNew='if(Math.random()<Math.min(0.85,chance*2.5))out.push({id,cnt});';
+ const loginMarker='async function handleLogin(client,p)';
+ const dispatchOld="if(msg.type==='quest')return handleQuest(client,p);if(msg.type==='world_chat')return handleChat(client,p);if(msg.type==='ping')return send(ws,'pong',{t:Date.now()});";
+ const dispatchNew="if(msg.type==='quest')return handleQuest(client,p);if(msg.type==='world_chat')return handleChat(client,p);if(msg.type==='market')return handleMarket(client,p);if(msg.type==='ping')return send(ws,'pong',{t:Date.now()});";
+ const marketCode=`
+const MARKET_FILE=path.join(__dirname,'data','market.json');
+let marketListings=[];
+try{marketListings=JSON.parse(fs.readFileSync(MARKET_FILE,'utf8'));if(!Array.isArray(marketListings))marketListings=[];}catch(_){marketListings=[];}
+function saveMarket(){try{fs.mkdirSync(path.dirname(MARKET_FILE),{recursive:true});fs.writeFileSync(MARKET_FILE,JSON.stringify(marketListings,null,2));}catch(e){console.error('market save failed',e&&e.message);}}
+function publicMarket(viewerToken){return marketListings.map(x=>({id:x.id,itemId:x.itemId,itemName:(ITEM_CATALOG[x.itemId]||{}).name||x.itemId,qty:x.qty,price:x.price,en:x.en||0,bless:!!x.bless,sellerName:x.sellerName,createdAt:x.createdAt,mine:x.sellerToken===viewerToken}));}
+function sendMarket(client){send(client.ws,'market_snapshot',{listings:publicMarket(client.token)});}
+function broadcastMarket(){for(const cl of clients.values())if(cl.token)sendMarket(cl);}
+function handleMarket(client,p){
+ const c=clientChar(client);if(!c)return;
+ const action=cleanText(p.action,20);
+ if(action==='list'){sendMarket(client);return;}
+ if(action==='sell'){
+  const it=findInv(c,cleanText(p.uid,40));if(!it)return error(client.ws,'找不到要上架的物品。');
+  if(itemEquipped(c,it.uid))return error(client.ws,'裝備中的物品不能上架。');
+  if(it.lock)return error(client.ws,'鎖定中的物品不能上架。');
+  const qty=Math.max(1,Math.min(Number(it.cnt)||1,Math.floor(Number(p.qty)||1)));
+  const price=Math.max(1,Math.min(999999999,Math.floor(Number(p.price)||0)));
+  if(price<1)return error(client.ws,'請輸入正確的售價。');
+  const own=marketListings.filter(x=>x.sellerToken===client.token).length;if(own>=20)return error(client.ws,'最多只能同時上架 20 筆。');
+  const listing={id:uid('mk'),sellerToken:client.token,sellerName:c.name,itemId:it.id,qty,price,en:Number(it.en)||0,bless:!!it.bless,createdAt:Date.now()};
+  removeItem(c,it.uid,qty);marketListings.push(listing);saveMarket();commit(client,{type:'market_sell',listingId:listing.id,itemId:listing.itemId,qty,price});broadcastMarket();return;
+ }
+ if(action==='cancel'){
+  const id=cleanText(p.id,60),idx=marketListings.findIndex(x=>x.id===id&&x.sellerToken===client.token);if(idx<0)return error(client.ws,'找不到你的上架商品。');
+  const x=marketListings[idx];addItem(c,x.itemId,x.qty,{en:x.en,bless:x.bless});marketListings.splice(idx,1);saveMarket();commit(client,{type:'market_cancel',listingId:id,itemId:x.itemId,qty:x.qty});broadcastMarket();return;
+ }
+ if(action==='buy'){
+  const id=cleanText(p.id,60),idx=marketListings.findIndex(x=>x.id===id);if(idx<0)return error(client.ws,'商品已被購買或下架。');
+  const x=marketListings[idx];if(x.sellerToken===client.token)return error(client.ws,'不能購買自己上架的商品。');
+  if(c.gold<x.price)return error(client.ws,'金幣不足。');
+  const seller=characters.get(x.sellerToken);if(!seller)return error(client.ws,'賣家資料暫時無法讀取。');
+  c.gold-=x.price;seller.gold=(Number(seller.gold)||0)+x.price;addItem(c,x.itemId,x.qty,{en:x.en,bless:x.bless});marketListings.splice(idx,1);markDirty(client.token);markDirty(x.sellerToken);saveMarket();
+  commit(client,{type:'market_buy',listingId:id,itemId:x.itemId,qty:x.qty,price:x.price,seller:x.sellerName});
+  const sellerClient=[...clients.values()].find(cl=>cl.token===x.sellerToken);if(sellerClient)sendSnapshot(sellerClient,{type:'market_sold',listingId:id,itemId:x.itemId,qty:x.qty,price:x.price,buyer:c.name});
+  broadcastMarket();return;
+ }
+ error(client.ws,'未知的交易所操作。');
+}
+`;
+ if(!src.includes(a)||!src.includes(c)||!src.includes(e)||!src.includes(g)||!src.includes(dropOld)||!src.includes(loginMarker)||!src.includes(dispatchOld))throw new Error('server.js runtime hook signature changed');
+ src=src.replace(a,b).replace(c,d).replace(e,f).replace(g,h).replace(dropOld,dropNew).replace(loginMarker,marketCode+'\n'+loginMarker).replace(dispatchOld,dispatchNew);
+ fs.writeFileSync(runtimePath,src);return runtimePath;
+}
 let runtimeServer;try{runtimeServer=buildRuntimeServer()}catch(e){console.error('Cannot prepare game runtime:',e);process.exit(1)}
 const child=spawn(process.execPath,[runtimeServer],{cwd:__dirname,env:Object.assign({},process.env,{PORT:String(GAME_PORT),HOST:'127.0.0.1'}),stdio:'inherit'});child.on('exit',(code,signal)=>{console.error(`Game server exited code=${code} signal=${signal||''}`);process.exit(code||1)});
 function openBackend(onOpen,onMessage,onClose,onError){const b=new WebSocket(BACKEND_URL,{maxPayload:MAX_MSG});b.on('open',()=>onOpen(b));b.on('message',d=>onMessage(b,d));b.on('close',()=>onClose&&onClose());b.on('error',e=>onError&&onError(e));return b}
