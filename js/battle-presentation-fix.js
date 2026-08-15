@@ -121,19 +121,21 @@ function injectStyles(){
   const s=document.createElement('style');
   s.id='battle-presentation-fix-style';
   s.textContent=`
-#mob-list{position:relative!important;top:-34px!important}
-#mob-list .mob-card{min-height:170px!important;height:170px!important;background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important;display:flex!important;align-items:center!important;justify-content:center!important;overflow:visible!important}
+.world{position:relative!important;overflow:hidden!important}
+#mob-list{position:relative!important;top:-22px!important;width:100%!important;max-width:100%!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:8px!important;box-sizing:border-box!important;padding:0 4px!important}
+#mob-list .mob-card{min-width:0!important;max-width:100%!important;min-height:166px!important;height:166px!important;background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important;display:flex!important;align-items:center!important;justify-content:center!important;overflow:hidden!important}
 #mob-list .mob-card strong,#mob-list .mob-card span,#mob-list .mob-card small,#mob-list .mob-card em,#mob-list .mob-card .mini-bar{display:none!important}
-#mob-list .mob-card .mob-sprite{width:160px!important;height:160px!important;object-fit:contain!important;display:block!important;opacity:1!important;filter:none}
+#mob-list .mob-card .mob-sprite{width:min(154px,100%)!important;height:154px!important;max-width:100%!important;object-fit:contain!important;display:block!important;opacity:1!important;filter:none}
 #mob-list .mob-card[data-anim="hurt"] .mob-sprite{filter:brightness(1.55)!important}
-#mob-list .mob-card[data-anim="attack"] .mob-sprite{transform:translateX(-7px) scale(1.05)}
+#mob-list .mob-card[data-anim="attack"] .mob-sprite{transform:translateX(-5px) scale(1.03)}
 #mob-list .mob-card.dead,#mob-list .mob-card.death-static{opacity:1!important}
 #mob-list .mob-card.death-static::before{display:none!important;content:none!important}
-#battle-player{left:4px!important;bottom:-22px!important;width:350px!important;min-height:310px!important;display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:flex-end!important;position:relative!important;z-index:5!important}
+#battle-player{left:4px!important;bottom:-22px!important;width:350px!important;max-width:45%!important;min-height:310px!important;display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:flex-end!important;position:relative!important;z-index:5!important}
 #battle-player-img{display:none!important}
-#battle-player-weapon-img{width:310px!important;height:310px!important;object-fit:contain!important;image-rendering:pixelated;display:block!important;filter:drop-shadow(0 8px 8px #000)}
+#battle-player-weapon-img{width:min(310px,100%)!important;height:310px!important;max-width:100%!important;object-fit:contain!important;image-rendering:pixelated;display:block!important;filter:drop-shadow(0 8px 8px #000)}
 #battle-player-name{position:relative;z-index:2;margin-top:-30px}
-@media(max-width:760px){#mob-list{top:-18px!important}#battle-player{position:relative!important;left:auto!important;bottom:-12px!important;width:100%!important;min-height:255px!important;margin:0 auto 6px!important}#battle-player-weapon-img{width:250px!important;height:250px!important}}
+@media(max-width:1000px){#mob-list{grid-template-columns:repeat(2,minmax(0,1fr))!important;top:-16px!important}#mob-list .mob-card .mob-sprite{width:min(146px,100%)!important;height:146px!important}}
+@media(max-width:760px){#mob-list{grid-template-columns:repeat(2,minmax(0,1fr))!important;top:-10px!important;gap:4px!important;padding:0 2px!important}#mob-list .mob-card{height:142px!important;min-height:142px!important}#mob-list .mob-card .mob-sprite{width:min(132px,100%)!important;height:132px!important}#battle-player{position:relative!important;left:auto!important;bottom:-8px!important;width:100%!important;max-width:100%!important;min-height:245px!important;margin:0 auto 4px!important}#battle-player-weapon-img{width:min(238px,100%)!important;height:238px!important}}
 `;
   document.head.appendChild(s);
 }
