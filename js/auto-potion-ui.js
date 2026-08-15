@@ -1,0 +1,18 @@
+// MMO2 auto potion helper. Client sends only normal buy/use intents; server remains authoritative.
+(function(){
+'use strict';
+const KEY='mmo149_auto_potion_v1';
+const DEFAULT={enabled:true,threshold:45,autoBuy:true,buyQty:20};
+let cfg=load(),lastUseAt=0,lastBuyAt=0;
+function load(){try{return Object.assign({},DEFAULT,JSON.parse(localStorage.getItem(KEY)||'{}'));}catch(_){return Object.assign({},DEFAULT);}}
+function save(){localStorage.setItem(KEY,JSON.stringify(cfg));renderState();}
+function clamp(v,a,b){v=Math.floor(Number(v)||0);return Math.max(a,Math.min(b,v));}
+function setup(){const bar=document.querySelector('.mapbar');if(!bar||document.getElementById('auto-potion-box'))return false;const box=document.createElement('div');box.id='auto-potion-box';box.innerHTML=`<button id="auto-potion-btn" class="btn" type="button"></button><label class="auto-potion-threshold">HP&lt;<input id="auto-potion-threshold" type="number" min="10" max="95" step="5">%</label><button id="auto-potion-buy" class="btn" type="button"></button>`;bar.appendChild(box);document.getElementById('auto-potion-btn').onclick=()=>{cfg.enabled=!cfg.enabled;save();};document.getElementById('auto-potion-buy').onclick=()=>{cfg.autoBuy=!cfg.autoBuy;save();};document.getElementById('auto-potion-threshold').onchange=e=>{cfg.threshold=clamp(e.target.value,10,95);save();};injectStyle();renderState();return true;}
+function injectStyle(){if(document.getElementById('auto-potion-style'))return;const s=document.createElement('style');s.id='auto-potion-style';s.textContent=`#auto-potion-box{display:flex;gap:6px;align-items:center;flex-wrap:wrap}#auto-potion-box .btn{padding:8px 10px}#auto-potion-btn.active,#auto-potion-buy.active{background:#0f766e!important;border-color:#5eead4!important}.auto-potion-threshold{display:flex;align-items:center;gap:4px;font-size:12px;color:#cbd5e1}.auto-potion-threshold input{width:56px;padding:7px 5px;background:#0f172a;border:1px solid #475569;color:#fff;border-radius:6px;text-align:center}@media(max-width:760px){#auto-potion-box{width:100%}}`;document.head.appendChild(s);}
+function renderState(){const b=document.getElementById('auto-potion-btn'),buy=document.getElementById('auto-potion-buy'),th=document.getElementById('auto-potion-threshold');if(b){b.textContent='自動喝水：'+(cfg.enabled?'ON':'OFF');b.classList.toggle('active',cfg.enabled);}if(buy){buy.textContent='沒水自購：'+(cfg.autoBuy?'ON':'OFF');buy.classList.toggle('active',cfg.autoBuy);}if(th&&document.activeElement!==th)th.value=String(cfg.threshold);}
+function choosePotion(inv){const order=['potion_red','potion_orange','potion_clear'];for(const id of order){const it=(inv||[]).find(x=>x&&x.id===id&&(Number(x.cnt)||1)>0);if(it)return it;}return null;}
+function tick(){if(!cfg.enabled)return;const rt=window.MMO149Realtime,snap=rt?.snapshot?.(),self=snap?.self;if(!self||!rt?.isAuthoritative?.()||self.hp<=0||!self.maxHp)return;const hpPct=self.hp/self.maxHp*100;if(hpPct>cfg.threshold)return;const now=Date.now(),potion=choosePotion(self.inventory);if(potion){if(now-lastUseAt<850)return;lastUseAt=now;rt.useItem(potion.uid);return;}if(!cfg.autoBuy||now-lastBuyAt<2500)return;const price=45,qty=Math.max(1,Math.min(50,Number(cfg.buyQty)||20));if(Number(self.gold||0)<price)return;lastBuyAt=now;rt.buy('potion_red',qty);}
+function boot(){if(!setup()){const t=setInterval(()=>{if(setup())clearInterval(t);},50);}setInterval(tick,300);}
+window.MMO149AutoPotion={config:()=>Object.assign({},cfg),setThreshold:v=>{cfg.threshold=clamp(v,10,95);save();},setEnabled:v=>{cfg.enabled=!!v;save();},setAutoBuy:v=>{cfg.autoBuy=!!v;save();}};
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
+})();
