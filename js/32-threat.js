@@ -172,3 +172,58 @@ function stripThreatForSave() {
     if (typeof mapState === 'undefined' || !mapState || !mapState.mobs) return;
     for (let m of mapState.mobs) { if (m) { if (m._threat) delete m._threat; if (m._threatT != null) delete m._threatT; if (m._ironGuardTaunt) delete m._ironGuardTaunt; } }
 }
+
+// ---------- 八、1.49 懷舊世界範圍 ----------
+// 以早期四職業與小型核心世界為目標；不複製原作完整資料表，只限制本作既有內容的可見/可選範圍。
+(function applyClassic149Scope() {
+    const CLASSIC149_CLASSES = ['royal', 'knight', 'mage', 'elf'];
+    const CLASSIC149_MAPS = {
+        village: new Set(['town_silver_knight', 'town_elf', 'town_talking', 'town_gludio', 'town_gludin']),
+        wild: new Set(['silver_knight', 'talking_island', 'talking_island_port', 'zone_01', 'elf_forest', 'gludio', 'windwood', 'desert', 'kent']),
+        dungeon: new Set(['zone_06', 'zone_07', 'zone_08', 'zone_09', 'zone_10', 'zone_11', 'zone_12', 'zone_13', 'zone_14']),
+        special: new Set(['training'])
+    };
+
+    // 地圖分類在 js/11 已建立；直接縮小陣列，讓後續 UI 只看到 1.49 風格的核心地區。
+    try {
+        if (typeof MAP_CATEGORIES !== 'undefined') {
+            Object.keys(CLASSIC149_MAPS).forEach(function (group) {
+                if (Array.isArray(MAP_CATEGORIES[group])) {
+                    MAP_CATEGORIES[group] = MAP_CATEGORIES[group].filter(function (entry) {
+                        return entry && CLASSIC149_MAPS[group].has(entry.v);
+                    });
+                }
+            });
+            ['tower', 'rift', 'pirate_island'].forEach(function (group) {
+                if (Array.isArray(MAP_CATEGORIES[group])) MAP_CATEGORIES[group] = [];
+            });
+        }
+    } catch (e) {
+        console.warn('[classic149] map scope failed', e);
+    }
+
+    function applyClassic149Ui() {
+        // 使用者要求移除登入頁上方/下方的非官方版本版權宣告。
+        const disclaimer = document.getElementById('login-disclaimer');
+        if (disclaimer) disclaimer.remove();
+
+        // 1.49 風格：創角只保留王族、騎士、法師、妖精。
+        ['dark', 'illusionist', 'Dknight', 'warrior'].forEach(function (cls) {
+            const btn = document.getElementById('btn-class-base-' + cls);
+            if (btn) btn.remove();
+        });
+
+        // 防止外部呼叫或舊 UI 意外選到後期職業。
+        if (typeof window.selectClassBase === 'function' && !window.__classic149SelectWrapped) {
+            const originalSelectClassBase = window.selectClassBase;
+            window.selectClassBase = function (cls) {
+                if (CLASSIC149_CLASSES.indexOf(cls) === -1) return;
+                return originalSelectClassBase.apply(this, arguments);
+            };
+            window.__classic149SelectWrapped = true;
+        }
+    }
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', applyClassic149Ui, { once:true });
+    else applyClassic149Ui();
+})();
