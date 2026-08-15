@@ -20,8 +20,12 @@ function buildRuntimeServer(){
  const dropOld='if(Math.random()<chance)out.push({id,cnt});';
  const dropNew='if(Math.random()<Math.min(0.85,chance*2.5))out.push({id,cnt});';
  const loginMarker='async function handleLogin(client,p)';
- const dispatchOld="if(msg.type==='quest')return handleQuest(client,p);if(msg.type==='world_chat')return handleChat(client,p);if(msg.type==='ping')return send(ws,'pong',{t:Date.now()});";
- const dispatchNew="if(msg.type==='quest')return handleQuest(client,p);if(msg.type==='world_chat')return handleChat(client,p);if(msg.type==='market')return handleMarket(client,p);if(msg.type==='ping')return send(ws,'pong',{t:Date.now()});";
+ const loginSend="client.token=token;client.lastSeen=Date.now();send(client.ws,'auth_ok',{token,character:publicChar(char,client.id)});sendSnapshot(client,{type:'login'});presence();";
+ const loginSendNew="client.token=token;client.lastSeen=Date.now();const afkResult=settleOfflineAfk(char,token);send(client.ws,'auth_ok',{token,character:publicChar(char,client.id)});sendSnapshot(client,afkResult||{type:'login'});send(client.ws,'afk_status',{enabled:!!char.flags?.offlineAfkEnabled,maxHours:8});presence();";
+ const closeOld="ws.on('close',()=>{const c=clientChar(client),map=c&&c.map;clients.delete(id);if(map)broadcastMap(map,{type:'player_disconnect',id});presence();});";
+ const closeNew="ws.on('close',()=>{const c=clientChar(client),map=c&&c.map;if(c&&c.flags?.offlineAfkEnabled){c.flags.offlineAfkSince=Date.now();markDirty(client.token);flushDirty().catch(()=>{});}clients.delete(id);if(map)broadcastMap(map,{type:'player_disconnect',id});presence();});";
+ const dispatchOld="if(msg.type==='quest')return handleQuest(client,p);if(msg.type==='world_chat')return handleChat(client,p);if(msg.type==='market')return handleMarket(client,p);if(msg.type==='ping')return send(ws,'pong',{t:Date.now()});";
+ const dispatchNew="if(msg.type==='quest')return handleQuest(client,p);if(msg.type==='world_chat')return handleChat(client,p);if(msg.type==='market')return handleMarket(client,p);if(msg.type==='afk')return handleAfk(client,p);if(msg.type==='ping')return send(ws,'pong',{t:Date.now()});";
  const marketCode=`
 const MARKET_FILE=path.join(__dirname,'data','market.json');
 let marketListings=[];
@@ -61,9 +65,13 @@ function handleMarket(client,p){
  }
  error(client.ws,'未知的交易所操作。');
 }
+
+function ensureAfkFlags(c){c.flags=c.flags&&typeof c.flags==='object'?c.flags:{};if(typeof c.flags.offlineAfkEnabled!=='boolean')c.flags.offlineAfkEnabled=false;return c.flags;}
+function handleAfk(client,p){const c=clientChar(client);if(!c)return;const flags=ensureAfkFlags(c);flags.offlineAfkEnabled=!!p.enabled;flags.offlineAfkSince=flags.offlineAfkEnabled?Date.now():0;markDirty(client.token);commit(client,{type:'afk_toggle',enabled:flags.offlineAfkEnabled});send(client.ws,'afk_status',{enabled:flags.offlineAfkEnabled,maxHours:8});}
+function settleOfflineAfk(c,token){const flags=ensureAfkFlags(c);const since=Number(flags.offlineAfkSince)||0;flags.offlineAfkSince=0;if(!flags.offlineAfkEnabled||!since)return null;const map=MAPS[c.map];if(!map||map.safe||!Array.isArray(map.pool)||!map.pool.length)return {type:'offline_afk',seconds:0,kills:0,exp:0,gold:0,drops:[]};const seconds=Math.max(0,Math.min(8*3600,Math.floor((Date.now()-since)/1000)));if(seconds<20)return {type:'offline_afk',seconds,kills:0,exp:0,gold:0,drops:[]};recalc(c);const interval=Math.max(6,14-Math.min(6,Math.floor((Number(c.lv)||1)/10)));const kills=Math.min(4000,Math.floor(seconds/interval));let exp=0,gold=0;const totals=new Map();for(let i=0;i<kills;i++){const id=map.pool[rint(0,map.pool.length-1)],st=MOB_STATS[id]||[1,20,3,1],lv=Number(st[0])||1;exp+=Math.max(5,lv*7);gold+=rint(Math.max(1,lv*2),Math.max(3,lv*5));for(const d of rollDrops({templateId:id}))totals.set(d.id,(totals.get(d.id)||0)+d.cnt);}c.exp+=exp;c.gold+=gold;for(const [id,cnt] of totals)addItem(c,id,cnt);checkLevel(c);c.hp=c.maxHp;c.mp=c.maxMp;markDirty(token);return {type:'offline_afk',seconds,kills,exp,gold,drops:[...totals].map(([id,cnt])=>({id,cnt}))};}
 `;
- if(!src.includes(a)||!src.includes(c)||!src.includes(e)||!src.includes(g)||!src.includes(dropOld)||!src.includes(loginMarker)||!src.includes(dispatchOld))throw new Error('server.js runtime hook signature changed');
- src=src.replace(a,b).replace(c,d).replace(e,f).replace(g,h).replace(dropOld,dropNew).replace(loginMarker,marketCode+'\n'+loginMarker).replace(dispatchOld,dispatchNew);
+ if(!src.includes(a)||!src.includes(c)||!src.includes(e)||!src.includes(g)||!src.includes(dropOld)||!src.includes(loginMarker)||!src.includes(loginSend)||!src.includes(closeOld)||!src.includes(dispatchOld))throw new Error('server.js runtime hook signature changed');
+ src=src.replace(a,b).replace(c,d).replace(e,f).replace(g,h).replace(dropOld,dropNew).replace(loginMarker,marketCode+'\n'+loginMarker).replace(loginSend,loginSendNew).replace(closeOld,closeNew).replace(dispatchOld,dispatchNew);
  fs.writeFileSync(runtimePath,src);return runtimePath;
 }
 let runtimeServer;try{runtimeServer=buildRuntimeServer()}catch(e){console.error('Cannot prepare game runtime:',e);process.exit(1)}
