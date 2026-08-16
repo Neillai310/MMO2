@@ -1,39 +1,35 @@
 // MMO2 GM POS + World Boss UI. Realtime packets are handled by 33-realtime.js.
 (function(){
 'use strict';
-let gm=false,menu=[],boss=null;
+const ORDER_KEY='mmo149_gm_pos_orders_v1';
+let gm=false,menu=[],boss=null,cart={};
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function readOrders(){try{const x=JSON.parse(localStorage.getItem(ORDER_KEY)||'[]');return Array.isArray(x)?x:[]}catch(_){return[]}}
+function saveOrders(rows){try{localStorage.setItem(ORDER_KEY,JSON.stringify(rows.slice(0,100)))}catch(_){}}
 function ensure(){
- if(document.getElementById('gm-pos-btn'))return;
- const root=document.createElement('div');root.id='gm-pos-root';
- root.innerHTML=`<button id="gm-pos-btn" type="button" aria-label="GM POS">GM POS</button>
- <div id="gm-pos-modal" class="gm-pos-modal hidden"><div class="gm-pos-card"><div class="gm-pos-head"><div><b>滋味亭 POS</b><small>世界 BOSS 製造系統</small></div><button id="gm-pos-close" type="button">×</button></div><div id="gm-pos-menu"></div><div class="gm-pos-foot"><button id="gm-boss-cancel" class="btn" type="button">結束目前 BOSS</button></div></div></div>
- <div id="world-boss-banner" class="world-boss-banner hidden"></div>`;
- document.body.appendChild(root);
- const btn=document.getElementById('gm-pos-btn');
- btn.onclick=()=>{renderMenu();document.getElementById('gm-pos-modal')?.classList.remove('hidden')};
- document.getElementById('gm-pos-close').onclick=()=>document.getElementById('gm-pos-modal')?.classList.add('hidden');
- document.getElementById('gm-boss-cancel').onclick=()=>window.MMO149Realtime?.gmBossCancel?.();
+ const btn=document.getElementById('gm-pos-btn');if(!btn)return;
+ btn.onclick=open;
+ const modal=document.getElementById('gm-pos-modal');if(modal){const card=modal.querySelector('.gm-pos-card');if(card&&!document.getElementById('gm-pos-main')){card.innerHTML=`<div class="gm-pos-head"><div><b>滋味亭 POS</b><small>點餐 / 結帳 / 訂單紀錄</small></div><button id="gm-pos-close" type="button">×</button></div><div id="gm-pos-main" class="pos-layout"><div><div class="pos-tabs"><button class="pos-tab active" data-pos-tab="menu">點餐</button><button class="pos-tab" data-pos-tab="history">以往訂單</button></div><div id="gm-pos-menu"></div><div id="gm-pos-history" class="hidden"></div></div><aside class="pos-cart"><h3>目前訂單</h3><div id="gm-pos-cart"></div><div class="pos-cart-total">合計 <b id="gm-pos-total">$0</b></div><div class="pos-cart-actions"><button id="gm-pos-clear" class="btn" type="button">清空</button><button id="gm-pos-submit" class="btn pos-submit" type="button">送出訂單</button></div><div class="pos-boss-tools"><button id="gm-boss-cancel" class="btn" type="button">結束目前 BOSS</button></div></aside></div>`;}}
+ document.getElementById('gm-pos-close')?.addEventListener('click',()=>modal?.classList.add('hidden'));
+ document.getElementById('gm-pos-clear')?.addEventListener('click',()=>{cart={};renderCart()});
+ document.getElementById('gm-pos-submit')?.addEventListener('click',submitOrder);
+ document.getElementById('gm-boss-cancel')?.addEventListener('click',()=>window.MMO149Realtime?.gmBossCancel?.());
+ document.querySelectorAll('[data-pos-tab]').forEach(b=>b.onclick=()=>switchTab(b.dataset.posTab));
  syncButton();
 }
 function isLiveGm(){return gm===true||window.MMO149Realtime?.isGM?.()===true}
-function syncButton(){
- const btn=document.getElementById('gm-pos-btn');if(!btn)return;
- const live=isLiveGm();
- btn.style.cssText=live?
- 'display:block!important;visibility:visible!important;opacity:1!important;position:fixed!important;right:16px!important;bottom:86px!important;z-index:2147483647!important;width:76px!important;height:76px!important;border:3px solid #ffd56a!important;border-radius:50%!important;background:radial-gradient(circle,#a93b1d,#541305)!important;color:#fff2a8!important;font:900 12px/1.1 sans-serif!important;box-shadow:0 0 0 3px #210800,0 0 24px #ff9f2f!important;cursor:pointer!important;pointer-events:auto!important;transform:none!important;clip:auto!important;overflow:visible!important':
- 'display:none!important';
-}
-function renderMenu(){
- ensure();const box=document.getElementById('gm-pos-menu');if(!box)return;
- if(!menu.length){box.innerHTML='<div style="padding:22px;text-align:center;color:#6b4b31">GM 已登入，但 POS 菜單尚未由伺服器送達。請稍候 1 秒再開啟。</div>';return;}
- const groups={};for(const x of menu)(groups[x.category]||(groups[x.category]=[])).push(x);
- box.innerHTML=Object.entries(groups).map(([cat,rows])=>`<section class="pos-group"><h3>${esc(cat)}</h3><div class="pos-grid">${rows.map(x=>`<button class="pos-item" type="button" data-menu-id="${esc(x.id)}"><b>${esc(x.name)}</b><span>$${Number(x.price)||0}</span><small>製造 BOSS</small></button>`).join('')}</div></section>`).join('');
- box.querySelectorAll('[data-menu-id]').forEach(b=>b.onclick=()=>window.MMO149Realtime?.gmBossSpawn?.(b.dataset.menuId));
-}
-function status(p){gm=!!p?.gm;if(Array.isArray(p?.menu)&&p.menu.length)menu=p.menu;if(p?.boss)boss=p.boss;ensure();syncButton();renderMenu();if(boss)update({active:true,boss});}
-function update(p){ensure();const bar=document.getElementById('world-boss-banner');if(!bar)return;if(!p||!p.active){boss=null;bar.classList.add('hidden');if(p?.defeated)alert(`世界 BOSS「${p.defeated.name}」已被討伐！\n最後一擊：${p.defeated.killer||'冒險者'}`);return;}boss=p.boss||boss;if(!boss)return;bar.classList.remove('hidden');const hp=Math.max(0,Number(boss.hp)||0),max=Math.max(1,Number(boss.maxHp)||1),pc=Math.max(0,Math.min(100,hp/max*100));bar.innerHTML=`<div class="boss-title">⚔ 世界 BOSS　${esc(boss.name)} <small>${esc(boss.category||'')} / POS $${Number(boss.price)||0}</small></div><div class="boss-hp"><i style="width:${pc}%"></i><span>${hp.toLocaleString()} / ${max.toLocaleString()}</span></div><div class="boss-meta">GM：${esc(boss.spawnedBy||'GM')}　參戰 ${Number(boss.participants)||0} 人</div>`;}
-window.MMO149BossUI={status,update,isGM:()=>isLiveGm(),syncButton,open:()=>{ensure();renderMenu();document.getElementById('gm-pos-modal')?.classList.remove('hidden')}};
-function boot(){ensure();syncButton();setInterval(syncButton,250)}
+function syncButton(){const btn=document.getElementById('gm-pos-btn');if(!btn)return;btn.style.display=isLiveGm()?'block':'none'}
+function switchTab(tab){const menuBox=document.getElementById('gm-pos-menu'),hist=document.getElementById('gm-pos-history');document.querySelectorAll('[data-pos-tab]').forEach(b=>b.classList.toggle('active',b.dataset.posTab===tab));menuBox?.classList.toggle('hidden',tab!=='menu');hist?.classList.toggle('hidden',tab!=='history');if(tab==='history')renderHistory()}
+function addItem(id){const item=menu.find(x=>x.id===id);if(!item)return;cart[id]=(cart[id]||0)+1;renderCart()}
+function changeQty(id,d){if(!cart[id])return;cart[id]+=d;if(cart[id]<=0)delete cart[id];renderCart()}
+function renderMenu(){ensure();const box=document.getElementById('gm-pos-menu');if(!box)return;if(!menu.length){box.innerHTML='<div class="pos-empty">POS 菜單尚未由伺服器送達。</div>';return}const groups={};for(const x of menu)(groups[x.category]||(groups[x.category]=[])).push(x);box.innerHTML=Object.entries(groups).map(([cat,rows])=>`<section class="pos-group"><h3>${esc(cat)}</h3><div class="pos-grid">${rows.map(x=>`<button class="pos-item" type="button" data-add-item="${esc(x.id)}"><b>${esc(x.name)}</b><span>$${Number(x.price)||0}</span><small>點一下加入訂單</small></button>`).join('')}</div></section>`).join('');box.querySelectorAll('[data-add-item]').forEach(b=>b.onclick=()=>addItem(b.dataset.addItem))}
+function renderCart(){ensure();const box=document.getElementById('gm-pos-cart'),totalEl=document.getElementById('gm-pos-total');if(!box||!totalEl)return;let total=0;const rows=Object.entries(cart).map(([id,qty])=>{const x=menu.find(m=>m.id===id);if(!x)return'';const sub=(Number(x.price)||0)*qty;total+=sub;return `<div class="pos-cart-row"><div><b>${esc(x.name)}</b><small>$${Number(x.price)||0} × ${qty} = $${sub}</small></div><div class="pos-qty"><button data-qid="${esc(id)}" data-d="-1">−</button><span>${qty}</span><button data-qid="${esc(id)}" data-d="1">＋</button></div></div>`}).join('');box.innerHTML=rows||'<div class="pos-empty">尚未加入任何品項</div>';totalEl.textContent='$'+total;box.querySelectorAll('[data-qid]').forEach(b=>b.onclick=()=>changeQty(b.dataset.qid,Number(b.dataset.d)||0))}
+function submitOrder(){const items=Object.entries(cart).map(([id,qty])=>{const x=menu.find(m=>m.id===id);return x?{id:x.id,name:x.name,price:Number(x.price)||0,qty}:null}).filter(Boolean);if(!items.length){alert('目前訂單是空的。');return}const total=items.reduce((s,x)=>s+x.price*x.qty,0),order={id:'ORD-'+Date.now().toString(36).toUpperCase(),at:Date.now(),items,total};const orders=readOrders();orders.unshift(order);saveOrders(orders);cart={};renderCart();renderHistory();alert(`訂單已送出\n單號：${order.id}\n金額：$${total}`)}
+function renderHistory(){ensure();const box=document.getElementById('gm-pos-history');if(!box)return;const orders=readOrders();box.innerHTML=orders.length?`<div class="pos-history-list">${orders.map(o=>`<article class="pos-order"><header><b>${esc(o.id)}</b><span>${new Date(o.at).toLocaleString('zh-TW')}</span></header><div>${(o.items||[]).map(x=>`<div class="pos-order-line"><span>${esc(x.name)} × ${Number(x.qty)||0}</span><b>$${(Number(x.price)||0)*(Number(x.qty)||0)}</b></div>`).join('')}</div><footer>合計 <b>$${Number(o.total)||0}</b></footer></article>`).join('')}</div>`:'<div class="pos-empty">目前沒有歷史訂單。</div>'}
+function status(p){gm=!!p?.gm;if(Array.isArray(p?.menu)&&p.menu.length)menu=p.menu;if(p?.boss)boss=p.boss;ensure();syncButton();renderMenu();renderCart();if(boss)update({active:true,boss})}
+function update(p){ensure();const bar=document.getElementById('world-boss-banner');if(!bar)return;if(!p||!p.active){boss=null;bar.classList.add('hidden');if(p?.defeated)alert(`世界 BOSS「${p.defeated.name}」已被討伐！\n最後一擊：${p.defeated.killer||'冒險者'}`);return}boss=p.boss||boss;if(!boss)return;bar.classList.remove('hidden');const hp=Math.max(0,Number(boss.hp)||0),max=Math.max(1,Number(boss.maxHp)||1),pc=Math.max(0,Math.min(100,hp/max*100));bar.innerHTML=`<div class="boss-title">⚔ 世界 BOSS　${esc(boss.name)} <small>${esc(boss.category||'')} / POS $${Number(boss.price)||0}</small></div><div class="boss-hp"><i style="width:${pc}%"></i><span>${hp.toLocaleString()} / ${max.toLocaleString()}</span></div><div class="boss-meta">GM：${esc(boss.spawnedBy||'GM')}　參戰 ${Number(boss.participants)||0} 人</div>`}
+function open(){ensure();renderMenu();renderCart();switchTab('menu');document.getElementById('gm-pos-modal')?.classList.remove('hidden')}
+window.MMO149BossUI={status,update,isGM:()=>isLiveGm(),syncButton,open,orders:()=>readOrders()};
+function boot(){ensure();syncButton();setInterval(syncButton,500)}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
