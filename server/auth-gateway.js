@@ -14,10 +14,11 @@ const GAME_PORT=Number(process.env.GAME_PORT||PORT+1);
 const DATABASE_URL=process.env.DATABASE_URL||'';
 const MAX_MSG=16*1024;
 const BACKEND_URL=`ws://127.0.0.1:${GAME_PORT}`;
+const GM_ACCOUNTS=new Set(String(process.env.GM_ACCOUNTS||'').split(',').map(x=>x.trim().toLowerCase()).filter(Boolean));
 
 if(!DATABASE_URL){console.error('DATABASE_URL is required for account authentication.');process.exit(1)}
-
 const db=new Pool({connectionString:DATABASE_URL,ssl:process.env.NODE_ENV==='production'?{rejectUnauthorized:false}:undefined});
+
 const cleanAccount=v=>String(v||'').trim().toLowerCase().slice(0,32);
 const validAccount=a=>/^[a-z0-9_.-]{4,32}$/.test(a);
 const validPassword=p=>typeof p==='string'&&p.length>=4&&p.length<=72;
@@ -30,24 +31,28 @@ function makePassword(p){const salt=crypto.randomBytes(16).toString('hex');retur
 function safeEqualHex(a,b){try{const x=Buffer.from(a,'hex'),y=Buffer.from(b,'hex');return x.length===y.length&&crypto.timingSafeEqual(x,y)}catch(_){return false}}
 function send(ws,type,payload){if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify({type,payload:payload||{}}))}
 function fail(ws,code,message){send(ws,'error',{code,message})}
+function isGmAccount(account){return GM_ACCOUNTS.has(cleanAccount(account))}
 
 async function initDb(){
  await db.query(`CREATE TABLE IF NOT EXISTS accounts(username VARCHAR(32) PRIMARY KEY,password_salt VARCHAR(64) NOT NULL,password_hash VARCHAR(256) NOT NULL,character_token VARCHAR(96) UNIQUE NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),last_login_at TIMESTAMPTZ)`);
  await db.query('CREATE INDEX IF NOT EXISTS idx_accounts_character_token ON accounts(character_token)');
- console.log('PostgreSQL account authentication ready');
+ console.log(`PostgreSQL account authentication ready; GM accounts configured=${GM_ACCOUNTS.size}`);
 }
 
 function buildRuntimeServer(){
  const sourcePath=path.join(__dirname,'server.js');
  const runtimePath=path.join(__dirname,'.server-runtime.js');
  let src=fs.readFileSync(sourcePath,'utf8');
- const patch=(oldText,newText,label)=>{if(src.includes(oldText)){src=src.replace(oldText,newText);console.log('[runtime patch]',label);}else console.warn('[runtime patch skipped]',label);};
+ const patch=(oldText,newText,label)=>{if(src.includes(oldText)){src=src.replace(oldText,newText);console.log('[runtime patch]',label);return true;}console.warn('[runtime patch skipped]',label);return false;};
 
  patch("function newCharacter(name,cls){const b=baseForClass(cls),stats=rollStats(cls);return","function newCharacter(name,cls,rolledStats){const b=baseForClass(cls),stats=(rolledStats&&typeof rolledStats==='object')?rolledStats:rollStats(cls);return",'server rolled stats');
  patch('char=newCharacter(name,cls);','char=newCharacter(name,cls,p.stats);','use gateway rolled stats');
  patch('mob.respawnAt=Date.now()+5000;','mob.respawnAt=Date.now()+rint(1000,3000);','monster respawn 1-3 sec');
  patch('dead:m.dead}))};','dead:m.dead,respawnAt:m.respawnAt}))};','expose respawnAt');
  patch('if(Math.random()<chance)out.push({id,cnt});','if(Math.random()<Math.min(0.85,chance*2.5))out.push({id,cnt});','drop multiplier');
+
+ // The public browser never connects to the backend directly. Only this gateway can set trustedGm.
+ patch('client.gm=await isGmToken(token);','client.gm=(p.trustedGm===true)||await isGmToken(token);','trusted GM propagation');
 
  const marker='async function handleLogin(client,p)';
  const extra=`
@@ -101,13 +106,12 @@ function settleOfflineAfk(c,token){
   console.log('[runtime patch] market and offline AFK helpers');
  }
 
- patch("client.token=token;client.lastSeen=Date.now();send(client.ws,'auth_ok',{token,character:publicChar(char,client.id)});sendSnapshot(client,{type:'login'});presence();","client.token=token;client.lastSeen=Date.now();const afkResult=settleOfflineAfk(char,token);send(client.ws,'auth_ok',{token,character:publicChar(char,client.id)});sendSnapshot(client,afkResult||{type:'login'});send(client.ws,'afk_status',{enabled:!!char.flags?.offlineAfkEnabled,maxHours:8});presence();",'offline AFK login settlement');
+ patch("send(client.ws,'auth_ok',{token,character:publicChar(char,client.id)});sendSnapshot(client,{type:'login'});presence();send(client.ws,'gm_status',{gm:!!client.gm,menu:client.gm?POS_MENU:[],boss:publicBoss()});","const afkResult=settleOfflineAfk(char,token);send(client.ws,'auth_ok',{token,character:publicChar(char,client.id)});sendSnapshot(client,afkResult||{type:'login'});send(client.ws,'afk_status',{enabled:!!char.flags?.offlineAfkEnabled,maxHours:8});presence();send(client.ws,'gm_status',{gm:!!client.gm,menu:client.gm?POS_MENU:[],boss:publicBoss()});",'offline AFK login settlement');
+
  patch("ws.on('close',()=>{const c=clientChar(client),map=c&&c.map;clients.delete(id);if(map)broadcastMap(map,{type:'player_disconnect',id});presence();});","ws.on('close',()=>{const c=clientChar(client),map=c&&c.map;if(c&&c.flags?.offlineAfkEnabled){c.flags.offlineAfkSince=Date.now();markDirty(client.token);flushDirty().catch(()=>{});}clients.delete(id);if(map)broadcastMap(map,{type:'player_disconnect',id});presence();});",'offline AFK disconnect timestamp');
 
- const dispatchWithMarket="if(msg.type==='quest')return handleQuest(client,p);if(msg.type==='world_chat')return handleChat(client,p);if(msg.type==='market')return handleMarket(client,p);if(msg.type==='ping')return send(ws,'pong',{t:Date.now()});";
- const dispatchBase="if(msg.type==='quest')return handleQuest(client,p);if(msg.type==='world_chat')return handleChat(client,p);if(msg.type==='ping')return send(ws,'pong',{t:Date.now()});";
- const dispatchNew="if(msg.type==='quest')return handleQuest(client,p);if(msg.type==='world_chat')return handleChat(client,p);if(msg.type==='market')return handleMarket(client,p);if(msg.type==='afk')return handleAfk(client,p);if(msg.type==='ping')return send(ws,'pong',{t:Date.now()});";
- if(src.includes(dispatchWithMarket))src=src.replace(dispatchWithMarket,dispatchNew);else if(src.includes(dispatchBase))src=src.replace(dispatchBase,dispatchNew);else console.warn('[runtime patch skipped] market/afk dispatch signature not found');
+ if(!src.includes("msg.type==='market'"))patch("if(msg.type==='warehouse')return handleWarehouse(client,p);","if(msg.type==='warehouse')return handleWarehouse(client,p);if(msg.type==='market')return handleMarket(client,p);if(msg.type==='afk')return handleAfk(client,p);",'market/afk dispatch');
+ else if(!src.includes("msg.type==='afk'"))patch("if(msg.type==='market')return handleMarket(client,p);","if(msg.type==='market')return handleMarket(client,p);if(msg.type==='afk')return handleAfk(client,p);",'afk dispatch');
 
  fs.writeFileSync(runtimePath,src);
  return runtimePath;
@@ -120,6 +124,7 @@ child.on('exit',(code,signal)=>{console.error(`Game server exited code=${code} s
 
 function openBackend(onOpen,onMessage,onClose,onError){const b=new WebSocket(BACKEND_URL,{maxPayload:MAX_MSG});b.on('open',()=>onOpen(b));b.on('message',d=>onMessage(b,d));b.on('close',()=>onClose&&onClose());b.on('error',e=>onError&&onError(e));return b}
 async function authenticateAccount(account,password){const r=await db.query('SELECT username,password_salt,password_hash,character_token FROM accounts WHERE username=$1 LIMIT 1',[account]);if(!r.rows.length)return{error:'account_not_found'};const row=r.rows[0],candidate=hashPassword(password,row.password_salt);if(!safeEqualHex(candidate,row.password_hash))return{error:'wrong_password'};return{row}}
+async function accountForToken(token){if(!token)return'';try{const r=await db.query('SELECT username FROM accounts WHERE character_token=$1 LIMIT 1',[token]);return cleanAccount(r.rows[0]?.username||'');}catch(_){return''}}
 
 const activeSessions=new Map();
 function claimSession(key,client){key=String(key||'');if(!key)return;const old=activeSessions.get(key);if(old&&old!==client&&old.readyState===WebSocket.OPEN){send(old,'session_kicked',{code:'session_replaced',message:'有人登入您的帳號，帳號可能被盜用。'});setTimeout(()=>{try{old.close(4001,'session_replaced')}catch(_){}},150);}activeSessions.set(key,client);client.sessionKey=key;}
@@ -127,41 +132,65 @@ function releaseSession(client){if(client.sessionKey&&activeSessions.get(client.
 
 const server=http.createServer(async(req,res)=>{
  res.setHeader('Access-Control-Allow-Origin','*');res.setHeader('Content-Type','application/json; charset=utf-8');
- if(req.url==='/health'){try{const c=await db.query('SELECT COUNT(*)::int AS n FROM accounts');res.end(JSON.stringify({ok:true,world:'1.49',authority:'server',persistence:'postgresql',authentication:'postgresql-scrypt',singleSession:true,accounts:c.rows[0].n}))}catch(_){res.statusCode=500;res.end(JSON.stringify({ok:false,error:'database_unavailable'}))}return}
- res.end(JSON.stringify({name:'MMO2 1.49 auth gateway',authentication:'postgresql-scrypt',singleSession:true}));
+ if(req.url==='/health'){try{const c=await db.query('SELECT COUNT(*)::int AS n FROM accounts');res.end(JSON.stringify({ok:true,world:'1.49',authority:'server',persistence:'postgresql',authentication:'postgresql-scrypt',singleSession:true,accounts:c.rows[0].n,gmAccountsConfigured:GM_ACCOUNTS.size}))}catch(_){res.statusCode=500;res.end(JSON.stringify({ok:false,error:'database_unavailable'}))}return}
+ res.end(JSON.stringify({name:'MMO2 1.49 auth gateway',authentication:'postgresql-scrypt',singleSession:true,gmAccountsConfigured:GM_ACCOUNTS.size}));
 });
 
 const wss=new WebSocketServer({server,maxPayload:MAX_MSG});
 wss.on('connection',client=>{
  let backend=null,authenticated=false,authInProgress=false;const rolls=new Map();send(client,'welcome',{world:'1.49',authority:'server',authentication:'postgresql'});
- function attach(token,registration,sessionKey){
+
+ function attach(token,registration,sessionKey,gm){
   if(backend)try{backend.close()}catch(_){}let ready=false;
-  backend=openBackend(ws=>{ready=true;ws.send(JSON.stringify({type:'auth',payload:registration?{token:'',name:registration.name,cls:registration.cls,stats:registration.stats}:{token}}))},async(ws,data)=>{
-   let packet;try{packet=JSON.parse(data.toString())}catch(_){return}if(packet.type==='welcome')return;
+  backend=openBackend(ws=>{
+   ready=true;
+   const payload=registration?{token:'',name:registration.name,cls:registration.cls,stats:registration.stats,trustedGm:!!gm}:{token,trustedGm:!!gm};
+   ws.send(JSON.stringify({type:'auth',payload}));
+  },async(ws,data)=>{
+   let packet;try{packet=JSON.parse(data.toString())}catch(_){return}
+   if(packet.type==='welcome')return;
    if(registration&&packet.type==='auth_ok'){
     const newToken=packet.payload&&packet.payload.token;if(!newToken){authInProgress=false;return fail(client,'registration_failed','建立角色失敗。')}
-    const creds=makePassword(registration.password);try{await db.query('INSERT INTO accounts(username,password_salt,password_hash,character_token,last_login_at) VALUES($1,$2,$3,$4,NOW())',[registration.account,creds.salt,creds.hash,newToken])}catch(e){authInProgress=false;try{ws.close()}catch(_){};return fail(client,e&&e.code==='23505'?'account_exists':'registration_failed',e&&e.code==='23505'?'這個帳號已經有人使用。':'帳號建立失敗，請稍後再試。')}
-    authenticated=true;authInProgress=false;claimSession(registration.account,client);packet.payload.account=registration.account;packet.payload.auth='postgresql';return send(client,packet.type,packet.payload);
+    const creds=makePassword(registration.password);
+    try{await db.query('INSERT INTO accounts(username,password_salt,password_hash,character_token,last_login_at) VALUES($1,$2,$3,$4,NOW())',[registration.account,creds.salt,creds.hash,newToken])}catch(e){authInProgress=false;try{ws.close()}catch(_){};return fail(client,e&&e.code==='23505'?'account_exists':'registration_failed',e&&e.code==='23505'?'這個帳號已經有人使用。':'帳號建立失敗，請稍後再試。')}
+    authenticated=true;authInProgress=false;claimSession(registration.account,client);packet.payload.account=registration.account;packet.payload.auth='postgresql';packet.payload.gm=!!gm;send(client,packet.type,packet.payload);return;
    }
-   if(!registration&&packet.type==='auth_ok'){authenticated=true;authInProgress=false;claimSession(sessionKey||token,client);packet.payload.auth='postgresql';return send(client,packet.type,packet.payload)}
-   if(packet.type==='error'&&!authenticated)authInProgress=false;if(client.readyState===WebSocket.OPEN)client.send(data.toString());
+   if(!registration&&packet.type==='auth_ok'){
+    authenticated=true;authInProgress=false;claimSession(sessionKey||token,client);packet.payload.auth='postgresql';packet.payload.gm=!!gm;send(client,packet.type,packet.payload);return;
+   }
+   if(packet.type==='error'&&!authenticated)authInProgress=false;
+   if(client.readyState===WebSocket.OPEN)client.send(data.toString());
   },()=>{if(authenticated&&client.readyState===WebSocket.OPEN){fail(client,'game_backend_closed','遊戲伺服器連線中斷。');try{client.close()}catch(_){}}},()=>{if(!ready){authInProgress=false;fail(client,'game_backend_unavailable','遊戲伺服器啟動中，請稍後再試。')}});
  }
+
  client.on('message',async raw=>{
   let msg;try{msg=JSON.parse(raw.toString())}catch(_){return}const p=msg.payload||{};
   if(msg.type==='ping'&&!authenticated)return send(client,'pong',{t:Date.now()});
   if(msg.type==='roll_stats'&&!authenticated){const cls=String(p.cls||''),stats=rollClassStats(cls);if(!stats)return fail(client,'invalid_class','請先選擇職業。');const rollId=crypto.randomBytes(16).toString('hex');rolls.set(rollId,{cls,stats,expires:Date.now()+10*60*1000});return send(client,'roll_stats',{rollId,cls,stats});}
   if(msg.type==='auth'){
-   if(authInProgress)return;authInProgress=true;const legacyToken=String(p.token||'').trim().slice(0,96),account=cleanAccount(p.account),password=String(p.password||'');
-   if(p.register===true){if(!validAccount(account)||!validPassword(password)){authInProgress=false;return fail(client,'invalid_credentials','帳號或密碼格式不正確。')}const name=String(p.name||'').trim().slice(0,12),cls=String(p.cls||''),rollId=String(p.rollId||''),roll=rolls.get(rollId);if(name.length<2||!CLASS_RANGES[cls]){authInProgress=false;return fail(client,'invalid_character','請輸入 2～12 字角色名稱並選擇職業。')}if(!roll||roll.cls!==cls||roll.expires<Date.now()){authInProgress=false;return fail(client,'invalid_roll','請重新按「Server 擲骰」取得角色能力值。')}rolls.delete(rollId);const exists=await db.query('SELECT 1 FROM accounts WHERE username=$1 LIMIT 1',[account]);if(exists.rows.length){authInProgress=false;return fail(client,'account_exists','這個帳號已經有人使用。')}return attach('',{account,password,name,cls,stats:roll.stats},account)}
-   if(account||password){if(!validAccount(account)||!validPassword(password)){authInProgress=false;return fail(client,'invalid_credentials','帳號或密碼格式不正確。')}try{const r=await authenticateAccount(account,password);if(r.error){authInProgress=false;return fail(client,r.error,r.error==='account_not_found'?'找不到這個帳號。':'帳號或密碼錯誤。')}await db.query('UPDATE accounts SET last_login_at=NOW() WHERE username=$1',[account]);return attach(r.row.character_token,null,account)}catch(_){authInProgress=false;return fail(client,'database_error','資料庫驗證失敗，請稍後再試。')}}
-   if(legacyToken)return attach(legacyToken,null,legacyToken);authInProgress=false;return fail(client,'invalid_credentials','請輸入帳號與密碼。');
+   if(authInProgress)return;authInProgress=true;
+   const legacyToken=String(p.token||'').trim().slice(0,96),account=cleanAccount(p.account),password=String(p.password||'');
+   if(p.register===true){
+    if(!validAccount(account)||!validPassword(password)){authInProgress=false;return fail(client,'invalid_credentials','帳號或密碼格式不正確。')}
+    const name=String(p.name||'').trim().slice(0,12),cls=String(p.cls||''),rollId=String(p.rollId||''),roll=rolls.get(rollId);
+    if(name.length<2||!CLASS_RANGES[cls]){authInProgress=false;return fail(client,'invalid_character','請輸入 2～12 字角色名稱並選擇職業。')}
+    if(!roll||roll.cls!==cls||roll.expires<Date.now()){authInProgress=false;return fail(client,'invalid_roll','請重新按「Server 擲骰」取得角色能力值。')}
+    rolls.delete(rollId);const exists=await db.query('SELECT 1 FROM accounts WHERE username=$1 LIMIT 1',[account]);if(exists.rows.length){authInProgress=false;return fail(client,'account_exists','這個帳號已經有人使用。')}
+    return attach('',{account,password,name,cls,stats:roll.stats},account,isGmAccount(account));
+   }
+   if(account||password){
+    if(!validAccount(account)||!validPassword(password)){authInProgress=false;return fail(client,'invalid_credentials','帳號或密碼格式不正確。')}
+    try{const r=await authenticateAccount(account,password);if(r.error){authInProgress=false;return fail(client,r.error,r.error==='account_not_found'?'找不到這個帳號。':'帳號或密碼錯誤。')}await db.query('UPDATE accounts SET last_login_at=NOW() WHERE username=$1',[account]);return attach(r.row.character_token,null,account,isGmAccount(account));}catch(_){authInProgress=false;return fail(client,'database_error','資料庫驗證失敗，請稍後再試。')}
+   }
+   if(legacyToken){const legacyAccount=await accountForToken(legacyToken);return attach(legacyToken,null,legacyAccount||legacyToken,isGmAccount(legacyAccount));}
+   authInProgress=false;return fail(client,'invalid_credentials','請輸入帳號與密碼。');
   }
-  if(!authenticated||!backend||backend.readyState!==WebSocket.OPEN)return fail(client,'not_authenticated','請先登入帳號。');backend.send(raw.toString());
+  if(!authenticated||!backend||backend.readyState!==WebSocket.OPEN)return fail(client,'not_authenticated','請先登入帳號。');
+  backend.send(raw.toString());
  });
  client.on('close',()=>{releaseSession(client);if(backend)try{backend.close()}catch(_){}});
 });
 
-(async()=>{try{await initDb();server.listen(PORT,HOST,()=>console.log(`MMO2 auth gateway on ${HOST}:${PORT}; game backend ${BACKEND_URL}`))}catch(e){console.error('Auth gateway startup failed:',e);try{child.kill()}catch(_){}process.exit(1)}})();
+(async()=>{try{await initDb();server.listen(PORT,HOST,()=>console.log(`MMO2 auth gateway on ${HOST}:${PORT}; game backend ${BACKEND_URL}; GM configured=${GM_ACCOUNTS.size}`))}catch(e){console.error('Auth gateway startup failed:',e);try{child.kill()}catch(_){}process.exit(1)}})();
 async function shutdown(){try{child.kill('SIGTERM')}catch(_){}try{fs.unlinkSync(runtimeServer)}catch(_){}try{await db.end()}catch(_){}process.exit(0)}
 process.on('SIGINT',shutdown);process.on('SIGTERM',shutdown);
