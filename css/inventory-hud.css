@@ -1,0 +1,37 @@
+/* MMO2 game-style inventory, equipment and player tabs */
+.side.right>.tabs{grid-template-columns:repeat(5,1fr)!important}
+.side.right>.tabs .btn{font-size:11px!important;padding:11px 2px!important}
+#right-content-panel{position:relative!important;overflow:hidden!important}
+#tab-items,#tab-equip,#tab-players{height:100%!important;overflow:auto!important}
+
+.inventory-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;color:#ffd56a;font-size:11px}
+.inventory-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:5px;align-content:start}
+.inventory-slot{position:relative;aspect-ratio:1/1;min-width:0;border:1px solid #5b4930;border-radius:5px;background:radial-gradient(circle at 50% 38%,#17344a 0,#0a1d2d 56%,#06131f 100%);box-shadow:inset 0 0 0 1px #02090e,0 1px 2px #0008;padding:3px;display:grid;place-items:center;color:#fff;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.inventory-slot.empty-slot{cursor:default;opacity:.62;background:linear-gradient(145deg,#071622,#0a1c29)}
+.inventory-slot:not(.empty-slot):hover,.inventory-slot.selected{border-color:#f0c65c;box-shadow:inset 0 0 8px #e4a62d33,0 0 7px #d5a54466}
+.inventory-slot img{width:82%;height:82%;object-fit:contain;image-rendering:pixelated;pointer-events:none;filter:drop-shadow(0 2px 2px #000)}
+.inventory-slot .item-count{position:absolute;right:3px;bottom:1px;min-width:12px;text-align:right;font-size:9px;font-weight:700;color:#fff;text-shadow:0 1px 2px #000,1px 0 2px #000;pointer-events:none}
+.inventory-slot .item-enhance{position:absolute;left:3px;top:2px;font-size:9px;font-weight:800;color:#63d6ff;text-shadow:0 1px 2px #000;pointer-events:none}
+.inventory-tooltip{position:absolute;z-index:80;left:8px;right:8px;bottom:8px;min-height:58px;padding:8px 10px;border:1px solid #c89b3c;border-radius:6px;background:rgba(2,11,19,.97);box-shadow:0 6px 20px #000b;pointer-events:none;opacity:0;transform:translateY(5px);transition:.12s ease;color:#eaf6ff;font-size:11px}
+.inventory-tooltip.visible{opacity:1;transform:none}
+.inventory-tooltip b{display:block;color:#ffd56a;font-size:12px;margin-bottom:3px}.inventory-tooltip span{color:#9fc0d5}.inventory-hint{margin-top:7px;text-align:center;color:#6f8ca0;font-size:9px}
+
+.equipment-board{position:relative;min-height:390px;border:1px solid #765c28;border-radius:8px;background:radial-gradient(ellipse at 50% 45%,#102c42 0,#071824 48%,#030d15 100%);overflow:hidden;padding:10px}
+.equipment-board::before{content:"EQUIPMENT";position:absolute;top:10px;left:50%;transform:translateX(-50%);color:#a78a4b;font-size:9px;letter-spacing:2px}
+.equipment-silhouette{position:absolute;left:50%;top:55px;transform:translateX(-50%);width:112px;height:270px;opacity:.18;pointer-events:none}
+.equipment-silhouette::before{content:"";position:absolute;left:37px;top:0;width:38px;height:38px;border:2px solid #8fa8b7;border-radius:50%}
+.equipment-silhouette::after{content:"";position:absolute;left:18px;top:42px;width:76px;height:185px;border:2px solid #8fa8b7;border-radius:38% 38% 20% 20%;clip-path:polygon(23% 0,77% 0,100% 25%,82% 100%,18% 100%,0 25%)}
+.equip-slot{position:absolute;width:58px;height:66px;border:1px solid #6c5631;border-radius:6px;background:linear-gradient(#10293c,#06131f);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:#8399a8;cursor:pointer;padding:3px;box-shadow:inset 0 0 0 1px #02090f}
+.equip-slot.filled{border-color:#c89b3c;color:#ffd56a}.equip-slot:hover{border-color:#f5d77b}
+.equip-slot img{width:44px;height:44px;object-fit:contain;image-rendering:pixelated}.equip-slot small{width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;font-size:8px}.equip-slot .part-label{font-size:9px;color:#69869a}
+.equip-slot[data-equip-pos="helm"]{top:38px;left:50%;transform:translateX(-50%)}
+.equip-slot[data-equip-pos="cloak"]{top:110px;left:13px}.equip-slot[data-equip-pos="amulet"]{top:110px;right:13px}
+.equip-slot[data-equip-pos="wpn"]{top:184px;left:13px}.equip-slot[data-equip-pos="armor"]{top:184px;left:50%;transform:translateX(-50%)}.equip-slot[data-equip-pos="shield"]{top:184px;right:13px}
+.equip-slot[data-equip-pos="gloves"]{top:258px;left:13px}.equip-slot[data-equip-pos="boots"]{top:258px;left:50%;transform:translateX(-50%)}.equip-slot[data-equip-pos="ring"]{top:258px;right:13px}
+.equipment-note{position:absolute;bottom:8px;left:8px;right:8px;text-align:center;color:#658398;font-size:9px}
+
+.player-list-title{display:flex;align-items:center;justify-content:space-between;color:#ffd56a;border-bottom:1px solid #29485f;padding-bottom:7px;margin-bottom:7px;font-size:12px}.player-entry{display:grid;grid-template-columns:34px 1fr auto;gap:8px;align-items:center;padding:7px;margin-bottom:5px;border:1px solid #27485e;border-radius:5px;background:#071b2b}.player-avatar{width:34px;height:34px;border-radius:50%;border:1px solid #866d39;object-fit:cover}.player-entry b{font-size:11px;color:#fff}.player-entry small{display:block;color:#86a3b7;font-size:9px}.player-level{color:#ffd56a;font-size:10px}
+
+@media(max-width:1180px){.inventory-grid{grid-template-columns:repeat(5,1fr)}.equip-slot{width:52px;height:61px}.equip-slot img{width:39px;height:39px}}
+@media(max-width:900px){.side.right>.tabs .btn{font-size:10px!important}.inventory-grid{grid-template-columns:repeat(7,1fr)}.equipment-board{min-height:380px}}
+@media(max-width:560px){.inventory-grid{grid-template-columns:repeat(6,1fr);gap:4px}.inventory-slot .item-count{font-size:8px}.equipment-board{min-height:360px}.equip-slot{width:50px;height:58px}.equip-slot img{width:36px;height:36px}}
